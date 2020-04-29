@@ -1,21 +1,27 @@
 
-bool debug = false; // Serial.print если = 1
+bool debug = 1; // Serial.print если = 1
 
 #include<AccelStepper.h>
+
 
 // ----------------------------------------------------------
 // Определение пинов для управления двигателем
 
-#define motorPin1  14 // IN1 на 1-м драйвере ULN2003
-#define motorPin2  12 // IN2 на 1-м драйвере ULN2003
-#define motorPin3  13 // IN3 на 1-м драйвере ULN2003
-#define motorPin4  15 // IN4 на 1-м драйвере ULN2003
+// NodeMCU
+#define motorPin1  14 // D5 - IN1 на 1-м драйвере ULN2003
+#define motorPin2  12 // D6 - IN2 на 1-м драйвере ULN2003
+#define motorPin3  13 // D7 - IN3 на 1-м драйвере ULN2003
+#define motorPin4  15 // D8 - IN4 на 1-м драйвере ULN2003
 
-#define magnetPin1  2
+#define magnetPinUp   5 // D1 - Data-pin верхнего датчика
+#define magnetPinDown 4 // D2 - Data-pin нижнего датчика
+
+//#define LED_BUILIN 16 // D0 - Пин встроенного светодиода
+
 
 // Variables // ---------------------------------------------
 
-bool OTA_on = true;
+bool OTA_on = false;
 bool MQTT_on = true;
 bool WIFI_on = true;
 byte wifi_err_couter = 0;
@@ -28,7 +34,22 @@ bool motor_rotate = false; // вращение мотора
 bool motor_man_control = 1; //
 bool motor_go_up = false;
 bool motor_go_down = false;
-float motor_man_speed = 800;
+
+float motor_man_speed = 800;  // скорость мотора в штатном режиме (0...1000)
+//float speed_correction = 0.5; // коэффициент мультипликатор значения скорости
+
+uint32_t max_steps = 1000; // количество шагов между крайними положениями
+//bool max_steps_calibrated = false; // признак успешной калибровки max_steps
+uint32_t steps_start = 0; // количество шагов, опредленное в момент начала движения
+uint32_t current_steps = 0; // количество шагов, сделанных мотором с момента начала движения
+
+byte current_position = 0; // Текущая позиция ($UP, $DOWN, $UNKNOWN)
+byte current_direction = 0; // Текущее направление
+byte $UP = 1;
+byte $DOWN = 2;
+byte $UNKNOWN = 0;
+
+
 
 // Meta data // ---------------------------------------------
 
@@ -57,11 +78,21 @@ const char* password = "ferromed"; //пароль точки доступа WIFI
 
 
 #include <PubSubClient.h>
-const char *mqtt_server = "m21.cloudmqtt.com"; // Имя сервера MQTT
-const int mqtt_port = 16195; // Порт для подключения к серверу MQTT
-const char *mqtt_user = "jrthidnj"; // Логи для подключения к серверу MQTT
-const char *mqtt_pass = "5ZYKoip4ef_S"; // Пароль для подключения к серверу MQTT
+/*
+  const char *mqtt_server = "m21.cloudmqtt.com"; // Имя сервера MQTT
+  const int mqtt_port = 16195; // Порт для подключения к серверу MQTT
+  const char *mqtt_user = "jrthidnj"; // Логи для подключения к серверу MQTT
+  const char *mqtt_pass = "5ZYKoip4ef_S"; // Пароль для подключения к серверу MQTT
+  const char *mqtt_unique_client_id = "arduinoClient_WindowMotor";
+*/
+
+const char *mqtt_server = "broker.hivemq.com"; // Имя сервера MQTT
+//const char *mqtt_server = "test.mosquitto.org"; // Имя сервера MQTT
+const int mqtt_port = 1883; // Порт для подключения к серверу MQTT
+const char *mqtt_user = ""; // Логи для подключения к серверу MQTT
+const char *mqtt_pass = ""; // Пароль для подключения к серверу MQTT
 const char *mqtt_unique_client_id = "arduinoClient_WindowMotor";
+
 
 #define BUFFER_SIZE 100
 WiFiClient wclient;
@@ -94,6 +125,11 @@ void setup() {
   pinMode(motorPin2, OUTPUT);
   pinMode(motorPin3, OUTPUT);
   pinMode(motorPin4, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  pinMode(magnetPinUp, INPUT);
+  pinMode(magnetPinDown, INPUT);
+
 
   // настариваем скорость и направление движения мотора // ----------
   stepper1.setMaxSpeed(1000.0);
@@ -120,6 +156,24 @@ void setup() {
     }
   }
 
+
+  // Первоначальное определение положения // ---------------------------------
+
+  if (motor_rotate)
+  {
+    // штатная работа
+    if (digitalRead(magnetPinUp) == LOW) current_position = $UP;
+    else if (digitalRead(magnetPinDown) == LOW) current_position = $DOWN;
+    else current_position = $UNKNOWN;
+
+    // сбой
+    if (digitalRead(magnetPinUp) == LOW && digitalRead(magnetPinDown) == LOW) current_position = $UNKNOWN;
+  }
+
+
+
+
+  // Сброс таймера
   timer = millis();
 }
 
@@ -181,12 +235,48 @@ void loop() {
     }
   } // if (WIFI_on)
   else delay(1);
+  //!Убери задержку
+
+
+  // Определение текущего положения // ---------------------------------
+
+  if (motor_rotate)  // проверяем только в движении, чтобы исключить паразитные срабатывания
+  {
+    // штатная работа
+    if (digitalRead(magnetPinUp) == LOW) current_position = $UP;
+    else if (digitalRead(magnetPinDown) == LOW) current_position = $DOWN;
+    else current_position = $UNKNOWN;
+
+    // сбой
+    if (digitalRead(magnetPinUp) == LOW && digitalRead(magnetPinDown) == LOW) current_position = $UNKNOWN;
+  }
+
+/*
+  if (millis() - timer > 2000)
+  {
+    if (debug == 1) Serial.println("up=  " + String(digitalRead(magnetPinUp)));
+    if (debug == 1) Serial.println("down=" + String(digitalRead(magnetPinDown)));
+    timer = millis();
+  }
+*/
+
+  // Калибровка количества шагов ---------------------------------------
+  /*
+    if (max_steps_calibrated == false)
+    {
+    if (motor_rotate)
+    }
+  */
+
+  // Коэффициент скорости ----------------------------------------------
+  //  if (max_steps_calibrated == true) speed_correction = 1;
 
 
 
 
   // Управление двигателем  // -----------------------------------------
 
+  // DEMO-режим
   if (motor_man_control == false)
   {
     stepper1.runSpeed();
@@ -196,6 +286,7 @@ void loop() {
     {
       //stepper1.stop();
 
+      // Выключаем напряжение на обмотках мотора
       digitalWrite(motorPin1, LOW);
       digitalWrite(motorPin2, LOW);
       digitalWrite(motorPin3, LOW);
@@ -213,48 +304,62 @@ void loop() {
     }
 
   }
-  
-  
+
+  // Штатный режим
   else
   {
-    if (motor_rotate)   stepper1.runSpeed();
+    if (motor_rotate)
+    {
+      stepper1.runSpeed(); // Крутим двигатель (нужно вызывать как можно чаще)
+      //!Подсчет количества сделанных шагов
+    }
     else
     {
+      // Выключаем напряжение на обмотках мотора (защита от перегрева)
       digitalWrite(motorPin1, LOW);
       digitalWrite(motorPin2, LOW);
       digitalWrite(motorPin3, LOW);
       digitalWrite(motorPin4, LOW);
 
-//      motor_go_up = 0;
-//      motor_go_down = 0;
+      digitalWrite(LED_BUILTIN, HIGH); // встроенный светодиод: HIGH - выкл, LOW - вкл
     }
 
+    // Команда ВВЕРХ - вручную
     if (motor_go_up)
     {
+      digitalWrite(LED_BUILTIN, LOW); // встроенный светодиод: HIGH - выкл, LOW - вкл
       motor_go_up = 0;
       motor_go_down = 0;
       motor_rotate = 1;
-      spd = motor_man_speed;
-      stepper1.setSpeed(spd);
+      current_direction = $UP;
+      stepper1.setSpeed(motor_man_speed); // Настраеваем скорость и направление движения
+      if (debug == 1) Serial.println("up=  " + String(digitalRead(magnetPinUp)));
+      if (debug == 1) Serial.println("down=" + String(digitalRead(magnetPinDown)));
     }
 
+    // Команда ВНИЗ - вручную
     if (motor_go_down)
     {
+      digitalWrite(LED_BUILTIN, LOW); // встроенный светодиод: HIGH - выкл, LOW - вкл
       motor_go_up = 0;
       motor_go_down = 0;
       motor_rotate = 1;
-      spd = -motor_man_speed;
-      stepper1.setSpeed(spd);
+      current_direction = $DOWN;
+      stepper1.setSpeed(-motor_man_speed); // Настраеваем скорость и направление движения
+      if (debug == 1) Serial.println("up=  " + String(digitalRead(magnetPinUp)));
+      if (debug == 1) Serial.println("down=" + String(digitalRead(magnetPinDown)));
     }
 
-    /*
-        if (motor_rotate == false)
-        {
-          motor_go_up = 0;
-          motor_go_down = 0;
-       }
-    */
+    // Команда СТОП - вручную
+    // поступает через MQTT-брокер
 
+
+    // Команда СТОП - от датчиков
+    if (motor_rotate)
+    {
+      if (current_direction == $UP && current_position == $UP) motor_rotate = false;
+      if (current_direction == $DOWN && current_position == $DOWN) motor_rotate = false;
+    }
   }
 
 
@@ -280,7 +385,8 @@ void mqtt_call()
       if (debug == 1) Serial.print("Connecting to MQTT server ");
       if (debug == 1) Serial.print(mqtt_server);
       if (debug == 1) Serial.println("...");
-      if (client.connect(MQTT::Connect(mqtt_unique_client_id).set_auth(mqtt_user, mqtt_pass)))
+      //if (client.connect(MQTT::Connect(mqtt_unique_client_id).set_auth(mqtt_user, mqtt_pass)))
+      if (client.connect(mqtt_unique_client_id))
       {
         if (debug == 1) Serial.println("Connected to MQTT server ");
 
@@ -299,7 +405,7 @@ void mqtt_call()
         client.subscribe("MQTT_on");
         //client.subscribe("btn_pressed");
         //client.subscribe("br_target");
-        
+
         client.subscribe("motor_rotate");
         client.subscribe("motor_go_up");
         client.subscribe("motor_go_down");
