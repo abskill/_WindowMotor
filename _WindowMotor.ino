@@ -36,6 +36,8 @@ bool motor_go_up = false;
 bool motor_go_down = false;
 
 float motor_man_speed = 800;  // скорость мотора в штатном режиме (0...1000)
+float speed_from_outside = motor_man_speed;  // скорость мотора из брокера
+
 //float speed_correction = 0.5; // коэффициент мультипликатор значения скорости
 
 uint32_t max_steps = 1000; // количество шагов между крайними положениями
@@ -49,6 +51,27 @@ byte $UP = 1;
 byte $DOWN = 2;
 byte $UNKNOWN = 0;
 
+
+uint32_t alarm_block_delay = 61000; // Время (мс) блокировки будильника после срабатывания
+bool alarm_block = false; //
+uint32_t alarm_block_timer = millis();  //
+uint32_t timer_1sec = millis(); //
+
+byte hh_up = 18;
+byte mm_up = 12;
+
+byte hh_down = 18;
+byte mm_down = 10;
+
+int currentHour = -1;
+int currentMinute = -1;
+int currentSecond = -1;
+
+byte hh_up_from_outside = hh_up;
+byte mm_up_from_outside = mm_up;
+
+byte hh_down_from_outside = hh_down;
+byte mm_down_from_outside = mm_down;
 
 
 // Meta data // ---------------------------------------------
@@ -112,8 +135,32 @@ bool mqtt_is_connected = false;
 bool OTA_started = false;
 
 
+// TIME // ---------------------------------------------------------
+
+#include <NTPClient.h>
+#include <WiFiUdp.h>
+
+// Define NTP Client to get time
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org");
+
+//Week Days
+String weekDays[7] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+
+//Month names
+String months[12] = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
+
+// Set offset time in seconds to adjust for your timezone, for example:
+// GMT +1 = 3600
+// GMT +8 = 28800
+// GMT -1 = -3600
+// GMT 0 = 0
+uint32_t GMT_p4 = 14400; // Ulyanovsk
+
+
+
 // -----------------------------------------------------------------
-// -----------------------------------------------------------------
+// SETUP // --------------------------------------------------------
 
 void setup() {
 
@@ -171,6 +218,12 @@ void setup() {
   }
 
 
+  // TIME // ---------------------------------------------------------
+
+  // Initialize a NTPClient to get time
+  timeClient.begin();
+  timeClient.setTimeOffset(GMT_p4);
+
 
 
   // Сброс таймера
@@ -180,7 +233,7 @@ void setup() {
 
 
 // -----------------------------------------------------------------
-// -----------------------------------------------------------------
+// LOOP // ---------------------------------------------------------
 
 void loop() {
 
@@ -233,9 +286,48 @@ void loop() {
         }
       }
     }
+
+    if (wf_is_connected == true) {         // TIME
+      if ((millis() - timer_1sec) > 1000)  {
+        timeClient.update();
+
+        unsigned long epochTime = timeClient.getEpochTime();
+        //if (debug == 1) Serial.println("Epoch Time: " + String(epochTime));
+
+        String formattedTime = timeClient.getFormattedTime();
+        if (debug == 1) Serial.println("Formatted Time: " + String(formattedTime));
+
+        currentHour = timeClient.getHours();
+        currentMinute = timeClient.getMinutes();
+        currentSecond = timeClient.getSeconds();
+
+        /*
+          String weekDay = weekDays[timeClient.getDay()];
+          //Get a time structure
+          struct tm *ptm = gmtime ((time_t *)&epochTime);
+          int monthDay = ptm->tm_mday;
+          int currentMonth = ptm->tm_mon+1;
+          String currentMonthName = months[currentMonth-1];
+          int currentYear = ptm->tm_year+1900;
+        */
+
+        timer_1sec = millis();
+      }
+    }
+
   } // if (WIFI_on)
   else delay(1);
   //!Убери задержку
+
+  // Применение внешних настроек // ---------------------------------------------
+
+  hh_up = hh_up_from_outside;
+  mm_up = mm_up_from_outside;
+
+  hh_down = hh_down_from_outside;
+  mm_down = mm_down_from_outside;
+
+  motor_man_speed = speed_from_outside;
 
 
   // Определение текущего положения // ---------------------------------
@@ -251,14 +343,14 @@ void loop() {
     if (digitalRead(magnetPinUp) == LOW && digitalRead(magnetPinDown) == LOW) current_position = $UNKNOWN;
   }
 
-/*
-  if (millis() - timer > 2000)
-  {
-    if (debug == 1) Serial.println("up=  " + String(digitalRead(magnetPinUp)));
-    if (debug == 1) Serial.println("down=" + String(digitalRead(magnetPinDown)));
-    timer = millis();
-  }
-*/
+  /*
+    if (millis() - timer > 2000)
+    {
+      if (debug == 1) Serial.println("up=  " + String(digitalRead(magnetPinUp)));
+      if (debug == 1) Serial.println("down=" + String(digitalRead(magnetPinDown)));
+      timer = millis();
+    }
+  */
 
   // Калибровка количества шагов ---------------------------------------
   /*
@@ -272,7 +364,12 @@ void loop() {
   //  if (max_steps_calibrated == true) speed_correction = 1;
 
 
+  // Снятие блокировки будильника --------------------------------------
 
+  if (alarm_block)
+  {
+    if ((millis() - alarm_block_timer) > alarm_block_delay) alarm_block = false;
+  }
 
   // Управление двигателем  // -----------------------------------------
 
@@ -311,6 +408,8 @@ void loop() {
     if (motor_rotate)
     {
       stepper1.runSpeed(); // Крутим двигатель (нужно вызывать как можно чаще)
+      //int32_t CP = stepper1.currentPosition();
+      if (debug == 1) Serial.println("currentPosition = " + String(stepper1.currentPosition()));
       //!Подсчет количества сделанных шагов
     }
     else
@@ -333,8 +432,8 @@ void loop() {
       motor_rotate = 1;
       current_direction = $UP;
       stepper1.setSpeed(motor_man_speed); // Настраеваем скорость и направление движения
-      if (debug == 1) Serial.println("up=  " + String(digitalRead(magnetPinUp)));
-      if (debug == 1) Serial.println("down=" + String(digitalRead(magnetPinDown)));
+      //if (debug == 1) Serial.println("up=  " + String(digitalRead(magnetPinUp)));
+      //if (debug == 1) Serial.println("down=" + String(digitalRead(magnetPinDown)));
     }
 
     // Команда ВНИЗ - вручную
@@ -346,9 +445,39 @@ void loop() {
       motor_rotate = 1;
       current_direction = $DOWN;
       stepper1.setSpeed(-motor_man_speed); // Настраеваем скорость и направление движения
-      if (debug == 1) Serial.println("up=  " + String(digitalRead(magnetPinUp)));
-      if (debug == 1) Serial.println("down=" + String(digitalRead(magnetPinDown)));
+      //if (debug == 1) Serial.println("up=  " + String(digitalRead(magnetPinUp)));
+      //if (debug == 1) Serial.println("down=" + String(digitalRead(magnetPinDown)));
     }
+
+    //if (debug == 1) Serial.println(String(currentHour)+":"+String(currentMinute));
+
+    // Команда ВВЕРХ - по времени
+    if (currentHour == hh_up && currentMinute == mm_up && alarm_block == false) {
+      if (motor_rotate) {
+        if (debug == 1) Serial.println("UP alarm is canceled");
+      }
+      else {
+        motor_go_up = 1;
+        alarm_block_timer = millis();
+        if (debug == 1) Serial.println("UP alarm");
+      }
+      alarm_block = true;
+    }
+
+
+    // Команда ВНИЗ - по времени
+    if (currentHour == hh_down && currentMinute == mm_down  && alarm_block == false) {
+      if (motor_rotate) {
+        if (debug == 1) Serial.println("DOWN alarm is canceled");
+      }
+      else {
+        motor_go_down = 1;
+        alarm_block_timer = millis();
+        if (debug == 1) Serial.println("DOWNP alarm");
+      }
+      alarm_block = true;
+    }
+
 
     // Команда СТОП - вручную
     // поступает через MQTT-брокер
@@ -360,6 +489,7 @@ void loop() {
       if (current_direction == $UP && current_position == $UP) motor_rotate = false;
       if (current_direction == $DOWN && current_position == $DOWN) motor_rotate = false;
     }
+
   }
 
 
@@ -411,6 +541,12 @@ void mqtt_call()
         client.subscribe("motor_go_down");
         client.subscribe("motor_man_control");
 
+        client.subscribe("hh_up_from_outside");
+        client.subscribe("mm_up_from_outside");
+        client.subscribe("hh_down_from_outside");
+        client.subscribe("mm_down_from_outside");
+
+        client.subscribe("speed_from_outside");
       }
       else
       {
@@ -435,10 +571,11 @@ void refreshData() {
   //client.publish("motor_go_down", String(motor_go_down));
   //client.publish("timer", String(constrain(delay_ms - (millis() - timer), 0, delay_ms)));
 
-  //client.publish("br", String(br));
-  //client.publish("sensor_command", String(sensor_command));
-  //client.publish("low_light", String(low_light));
-  //client.publish("btn_value", String(btn_value));
+  client.publish("hh_up", String(hh_up));
+  client.publish("mm_up", String(mm_up));
+  client.publish("hh_down", String(hh_down));
+  client.publish("mm_down", String(mm_down));
+
   //client.publish("vcc", String(ESP.getVcc())); // считаем напряжение на VCC (через пин A0)
   //client.publish("OTA_on", String(OTA_on));
 
@@ -467,6 +604,13 @@ void callback(const MQTT::Publish & pub)
   if (topic == "motor_go_up") motor_go_up = payload.toInt();
   if (topic == "motor_go_down") motor_go_down = payload.toInt();
   if (topic == "motor_man_control") motor_man_control = payload.toInt();
+
+  if (topic == "hh_up_from_outside") hh_up_from_outside = payload.toInt();
+  if (topic == "mm_up_from_outside") mm_up_from_outside = payload.toInt();
+  if (topic == "hh_down_from_outside") hh_down_from_outside = payload.toInt();
+  if (topic == "mm_down_from_outside") mm_down_from_outside = payload.toInt();
+
+  if (topic == "speed_from_outside") speed_from_outside = payload.toInt();
 
   // if (debug == 1) Serial.println("OTA_on = " + payload); // выводим в сериал порт значение полученных данных
 }
