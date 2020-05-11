@@ -1,5 +1,5 @@
 
-bool debug = 1; // Serial.print если = 1
+bool debug = 0; // Serial.print если = 1
 
 #include<AccelStepper.h>
 
@@ -8,26 +8,51 @@ bool debug = 1; // Serial.print если = 1
 // Определение пинов для управления двигателем
 
 // NodeMCU
-#define motorPin1  14 // D5 - IN1 на 1-м драйвере ULN2003
-#define motorPin2  12 // D6 - IN2 на 1-м драйвере ULN2003
-#define motorPin3  13 // D7 - IN3 на 1-м драйвере ULN2003
-#define motorPin4  15 // D8 - IN4 на 1-м драйвере ULN2003
+#define motorPin1  D5 // IN1 на 1-м драйвере ULN2003
+#define motorPin2  D6 // D6 - IN2 на 1-м драйвере ULN2003
+#define motorPin3  D7 // D7 - IN3 на 1-м драйвере ULN2003
+#define motorPin4  D8 // D8 - IN4 на 1-м драйвере ULN2003
 
-#define magnetPinUp   5 // D1 - Data-pin верхнего датчика
-#define magnetPinDown 4 // D2 - Data-pin нижнего датчика
+#define magnetPinUp   D2 // Data-pin верхнего датчика
+#define magnetPinDown 10// Data-pin нижнего датчика
+
+#define rfPin D1 // Data-pin RF приемника
+#define rfPowerPin D3 // D3 - Power-pin RF приемника
+/* Управление питанием RF приемника введено, т.к. по неизвестным причинам
+   WiFi не коннектится, пока включен RF приемник.
+   Питание восстанавливается после включения успешного подключения к WiFi
+*/
 
 //#define LED_BUILIN 16 // D0 - Пин встроенного светодиода
 
 
 // Variables // ---------------------------------------------
 
-bool OTA_on = false;
-bool MQTT_on = true;
-bool WIFI_on = true;
-byte wifi_err_couter = 0;
+bool OTA_on = true;
+uint32_t OTA_timeout = 300000; // После истечения этого времени (мс) с момента подачи питания режим будет выключен
 
-uint32_t delay_ms = 8000; // таймер
-uint32_t timer = millis(); // вспомогательный таймер
+bool MQTT_on = true;
+byte mqtt_err_counter = 0;       // Счетчик ошибок подлючения
+byte mqtt_number_of_trying = 10; // Максимальное количество попыток подключения
+uint32_t mqtt_delay = 500; // интервал обмена с MQTT сервером
+uint32_t mqtt_timer = 0; // вспомогательный таймер
+
+
+bool WIFI_on = true;
+byte wifi_err_counter = 0;
+uint32_t delay_of_trying_to_connect_wf = 60000 * 10; // пауза между попытками соединиться по WiFi
+uint32_t timer_of_trying_to_connect_wf = millis(); // вспомогательный таймер
+
+bool night_alarm = true; // Включение авто-режима (по времени)
+bool night_alarm_from_outside = night_alarm; //
+
+bool RF_on = true; // Включение RF433 приемника
+
+/*
+  uint32_t delay_ms = 8000; // таймер
+  uint32_t timer = millis(); // вспомогательный таймер
+*/
+
 float spd = 800;
 
 bool motor_rotate = false; // вращение мотора
@@ -35,7 +60,7 @@ bool motor_man_control = 1; //
 bool motor_go_up = false;
 bool motor_go_down = false;
 
-float motor_man_speed = 800;  // скорость мотора в штатном режиме (0...1000)
+float motor_man_speed = 800;  // скорость мотора (0...1000)
 float speed_from_outside = motor_man_speed;  // скорость мотора из брокера
 
 //float speed_correction = 0.5; // коэффициент мультипликатор значения скорости
@@ -52,25 +77,32 @@ byte $DOWN = 2;
 byte $UNKNOWN = 0;
 
 
+
 uint32_t alarm_block_delay = 61000; // Время (мс) блокировки будильника после срабатывания
-bool alarm_block = false; //
 uint32_t alarm_block_timer = millis();  //
-uint32_t timer_1sec = millis(); //
+bool alarm_block = false; //
 
-byte hh_up = 18;
-byte mm_up = 12;
+uint32_t calculate_time_delay = 500; // Интервал (мс) запроса врмени с NTP сервера
+uint32_t calculate_time_timer = millis(); //
 
-byte hh_down = 18;
-byte mm_down = 10;
 
-int currentHour = -1;
+byte hh_down = 14; // Время закрытия шторы
+byte mm_down = 48;
+
+byte hh_up = 14; // Время открытия шторы
+byte mm_up = 50;
+
+byte hh_time_request = 02; // Время, в которое будет происходить уточнение текущего времени с сервера (лучше ночью)
+byte mm_time_request = 00; // Корректировка будет происходить в течение минуты
+
+int currentHour = -1;  // переменные, в которых будет храниться текущее время
 int currentMinute = -1;
 int currentSecond = -1;
 
-byte hh_up_from_outside = hh_up;
+byte hh_up_from_outside = hh_up; // Для перенастройки будильника
 byte mm_up_from_outside = mm_up;
 
-byte hh_down_from_outside = hh_down;
+byte hh_down_from_outside = hh_down;  // Для перенастройки будильника
 byte mm_down_from_outside = mm_down;
 
 
@@ -80,8 +112,6 @@ byte mm_down_from_outside = mm_down;
 
 #define serialRate 74880 // Baudrate
 
-uint32_t mqtt_delay = 500; // интервал обмена с MQTT сервером
-uint32_t mqtt_timer = 0; // вспомогательный таймер
 
 
 // Инициализируемся с последовательностью выводов IN1-IN3-IN2-IN4
@@ -99,7 +129,6 @@ AccelStepper stepper1(HALFSTEP, motorPin1, motorPin3, motorPin2, motorPin4);
 const char* ssid = "EnergaiZer"; //Имя точки доступа WIFI
 const char* password = "ferromed"; //пароль точки доступа WIFI
 
-
 #include <PubSubClient.h>
 /*
   const char *mqtt_server = "m21.cloudmqtt.com"; // Имя сервера MQTT
@@ -110,12 +139,10 @@ const char* password = "ferromed"; //пароль точки доступа WIFI
 */
 
 const char *mqtt_server = "broker.hivemq.com"; // Имя сервера MQTT
-//const char *mqtt_server = "test.mosquitto.org"; // Имя сервера MQTT
 const int mqtt_port = 1883; // Порт для подключения к серверу MQTT
 const char *mqtt_user = ""; // Логи для подключения к серверу MQTT
 const char *mqtt_pass = ""; // Пароль для подключения к серверу MQTT
 const char *mqtt_unique_client_id = "arduinoClient_WindowMotor";
-
 
 #define BUFFER_SIZE 100
 WiFiClient wclient;
@@ -127,8 +154,6 @@ float temp = 0;
 //ADC_MODE(ADC_VCC); // A0 будет считытвать значение напряжения VCC
 
 
-uint32_t delay_of_trying_to_connect_wf = 60000 * 10;
-uint32_t timer_of_trying_to_connect_wf = millis();
 bool wf_is_connected = false;
 bool mqtt_is_connected = false;
 //void mqtt_call();
@@ -158,6 +183,25 @@ String months[12] = {"January", "February", "March", "April", "May", "June", "Ju
 uint32_t GMT_p4 = 14400; // Ulyanovsk
 
 
+// RF 433 // -------------------------------------------------------
+
+#include <RCSwitch.h>
+RCSwitch mySwitch = RCSwitch();
+
+#define btn_code_A 600258 //10434 // код кнопки радиоканала
+#define btn_code_B 300130 //10434 // код кнопки радиоканала
+
+bool btn_pressed_A = false;  // признак нажатия кнопки
+bool btn_pressed_B = false;  // признак нажатия кнопки
+
+bool mode_auto = true;  // режим автоматического управления с датчика движения
+bool btn_block = false;  // блокировка обработкки нажатия кнопки
+uint32_t btn_timer = 0;  // вспомогательный таймер
+
+uint32_t btn_delay = 300;  // после нажатия на кнопку ее обработка блокируется на это количество миллисекунд
+int btn_value = 0;  // значение кода кнопки
+
+
 
 // -----------------------------------------------------------------
 // SETUP // --------------------------------------------------------
@@ -172,11 +216,12 @@ void setup() {
   pinMode(motorPin2, OUTPUT);
   pinMode(motorPin3, OUTPUT);
   pinMode(motorPin4, OUTPUT);
-  pinMode(LED_BUILTIN, OUTPUT);
+  //pinMode(LED_BUILTIN, OUTPUT);
 
   pinMode(magnetPinUp, INPUT);
   pinMode(magnetPinDown, INPUT);
 
+  pinMode(rfPowerPin, OUTPUT);
 
   // настариваем скорость и направление движения мотора // ----------
   stepper1.setMaxSpeed(1000.0);
@@ -188,34 +233,43 @@ void setup() {
   // try_to_connect_wf(wf_is_connected);
   if (WIFI_on) {
     if (debug == 1) Serial.print("Connecting to wifi...");
+
+    digitalWrite(rfPowerPin, LOW); // временно выкл RF-приемник
     WiFi.mode(WIFI_STA);  WiFi.begin(ssid, password);  delay(1000);  if (WiFi.waitForConnectResult() != WL_CONNECTED)
     {
       if (debug == 1) Serial.println("fail");
 
       wf_is_connected = false;
       timer_of_trying_to_connect_wf = millis();
-      wifi_err_couter++;
+      wifi_err_counter++;
+      //      digitalWrite(rfPowerPin, HIGH); // временно выкл RF-приемник
     }
     else
     {
       if (debug == 1) Serial.println("ok");
       wf_is_connected = true;
+
+      timeClient.update(); // обновление вркмени с сервера
+      if (RF_on) digitalWrite(rfPowerPin, HIGH); // вкл RF-приемник после подключения к WiFi
     }
+  }
+
+  else
+  {
+    if (RF_on) digitalWrite(rfPowerPin, HIGH); // вкл RF-приемник
   }
 
 
   // Первоначальное определение положения // ---------------------------------
 
-  if (motor_rotate)
-  {
-    // штатная работа
-    if (digitalRead(magnetPinUp) == LOW) current_position = $UP;
-    else if (digitalRead(magnetPinDown) == LOW) current_position = $DOWN;
-    else current_position = $UNKNOWN;
+  if (digitalRead(magnetPinUp) == HIGH) current_position = $UP;
+  else if (digitalRead(magnetPinDown) == HIGH) current_position = $DOWN;
+  else current_position = $UNKNOWN;
 
-    // сбой
-    if (digitalRead(magnetPinUp) == LOW && digitalRead(magnetPinDown) == LOW) current_position = $UNKNOWN;
-  }
+  // сбой
+  if (digitalRead(magnetPinUp) == HIGH && digitalRead(magnetPinDown) == HIGH) current_position = $UNKNOWN;
+
+  if (debug == 1) Serial.println("Started position = " + String(current_position) + "    /1-up, 2-down, else unknown/");
 
 
   // TIME // ---------------------------------------------------------
@@ -226,8 +280,14 @@ void setup() {
 
 
 
+  // инициализируем приемник rf433
+  if (RF_on) mySwitch.enableReceive(rfPin);  // Receiver on interrupt rfPin
+
+
+
   // Сброс таймера
-  timer = millis();
+  //  timer = millis();
+
 }
 
 
@@ -240,21 +300,28 @@ void loop() {
   // Активности WiFi // ----------------------------------------------
   if (WIFI_on) {
     if (wf_is_connected == false) {
-      if (wifi_err_couter < 5 && (millis() - timer_of_trying_to_connect_wf) > delay_of_trying_to_connect_wf) {
+      if (wifi_err_counter < 5 && (millis() - timer_of_trying_to_connect_wf) > delay_of_trying_to_connect_wf) {
         // try_to_connect_wf(wf_is_connected);
         if (debug == 1) Serial.print("Connecting to wifi...");
         //digitalWrite(LED_BUILTIN, HIGH);
+
+        if (RF_on) digitalWrite(rfPowerPin, LOW); // временно выкл RF-приемник
+
         WiFi.mode(WIFI_STA);  WiFi.begin(ssid, password);  delay(1000);  if (WiFi.waitForConnectResult() != WL_CONNECTED)
         {
           if (debug == 1) Serial.println("fail");
           wf_is_connected = false;
           timer_of_trying_to_connect_wf = millis();
-          wifi_err_couter++;
+          wifi_err_counter++;
         }
         else
         {
           if (debug == 1) Serial.println("ok");
           wf_is_connected = true;
+          wifi_err_counter = 0; // сброс счетчика ошибок в случае успешного подключения
+
+          timeClient.update(); // обновление вркмени с сервера
+          if (RF_on) digitalWrite(rfPowerPin, HIGH); // вкл RF-приемник после подключения к WiFi
         }
         //digitalWrite(LED_BUILTIN, LOW);
       }
@@ -268,10 +335,17 @@ void loop() {
       if (OTA_on == false && MQTT_on == false) {
         WIFI_on = false;
         if (debug == 1) Serial.println("wifi_stop");
-        //STOP_WF()
+
+        if (RF_on) digitalWrite(rfPowerPin, HIGH); // вкл RF-приемник
       }
       else {
         if (OTA_on) {
+
+          if (millis() > OTA_timeout) {
+            OTA_on = false;
+            if (debug == 1) Serial.println("!!!_OTA is stoped by timeout_!!!");
+          }
+
           if (OTA_started == false) {
             if (debug == 1) Serial.println("OTA is started");
             // подключаем возможность прошивки по воздуху
@@ -288,8 +362,7 @@ void loop() {
     }
 
     if (wf_is_connected == true) {         // TIME
-      if ((millis() - timer_1sec) > 1000)  {
-        timeClient.update();
+      if ((millis() - calculate_time_timer) > calculate_time_delay)  {
 
         unsigned long epochTime = timeClient.getEpochTime();
         //if (debug == 1) Serial.println("Epoch Time: " + String(epochTime));
@@ -301,6 +374,8 @@ void loop() {
         currentMinute = timeClient.getMinutes();
         currentSecond = timeClient.getSeconds();
 
+        if (currentHour == hh_time_request && currentMinute == mm_time_request)  timeClient.update(); // обновление с сервера
+
         /*
           String weekDay = weekDays[timeClient.getDay()];
           //Get a time structure
@@ -311,13 +386,22 @@ void loop() {
           int currentYear = ptm->tm_year+1900;
         */
 
-        timer_1sec = millis();
+        calculate_time_timer = millis();
       }
     }
 
   } // if (WIFI_on)
-  else delay(1);
-  //!Убери задержку
+  else
+  {
+    //    if (RF_on) digitalWrite(rfPowerPin, HIGH); // вкл RF-приемник
+  }
+
+
+
+
+  if (RF_on) rf_control(); //
+
+
 
   // Применение внешних настроек // ---------------------------------------------
 
@@ -335,12 +419,14 @@ void loop() {
   if (motor_rotate)  // проверяем только в движении, чтобы исключить паразитные срабатывания
   {
     // штатная работа
-    if (digitalRead(magnetPinUp) == LOW) current_position = $UP;
-    else if (digitalRead(magnetPinDown) == LOW) current_position = $DOWN;
+    if (digitalRead(magnetPinUp) == HIGH) current_position = $UP;
+    else if (digitalRead(magnetPinDown) == HIGH) current_position = $DOWN;
     else current_position = $UNKNOWN;
 
     // сбой
-    if (digitalRead(magnetPinUp) == LOW && digitalRead(magnetPinDown) == LOW) current_position = $UNKNOWN;
+    if (digitalRead(magnetPinUp) == HIGH && digitalRead(magnetPinDown) == HIGH) current_position = $UNKNOWN;
+
+    //if (debug == 1) Serial.println("Current position = "+String(current_position)+"    /1-up, 2-down, else unknown/");
   }
 
   /*
@@ -376,30 +462,31 @@ void loop() {
   // DEMO-режим
   if (motor_man_control == false)
   {
-    stepper1.runSpeed();
-    //stepper.runSpeedToPosition();
+    /*
+       stepper1.runSpeed();
+       //stepper.runSpeedToPosition();
 
-    if (millis() - timer > delay_ms)
-    {
-      //stepper1.stop();
+       if (millis() - timer > delay_ms)
+       {
+         //stepper1.stop();
 
-      // Выключаем напряжение на обмотках мотора
-      digitalWrite(motorPin1, LOW);
-      digitalWrite(motorPin2, LOW);
-      digitalWrite(motorPin3, LOW);
-      digitalWrite(motorPin4, LOW);
+         // Выключаем напряжение на обмотках мотора
+         digitalWrite(motorPin1, LOW);
+         digitalWrite(motorPin2, LOW);
+         digitalWrite(motorPin3, LOW);
+         digitalWrite(motorPin4, LOW);
 
-      //motor_rotate = false;
+         //motor_rotate = false;
 
-      delay(20000);
-      spd = -spd;
-      //  stepper1.setMaxSpeed(spd); //1000.0);
-      stepper1.setSpeed(spd);
-      timer = millis();
+         delay(20000);
+         spd = -spd;
+         //  stepper1.setMaxSpeed(spd); //1000.0);
+         stepper1.setSpeed(spd);
+         timer = millis();
 
-      //motor_rotate = true;
-    }
-
+         //motor_rotate = true;
+       }
+    */
   }
 
   // Штатный режим
@@ -409,7 +496,7 @@ void loop() {
     {
       stepper1.runSpeed(); // Крутим двигатель (нужно вызывать как можно чаще)
       //int32_t CP = stepper1.currentPosition();
-      if (debug == 1) Serial.println("currentPosition = " + String(stepper1.currentPosition()));
+      //if (debug == 1) Serial.println("currentPosition = " + String(stepper1.currentPosition()));
       //!Подсчет количества сделанных шагов
     }
     else
@@ -420,13 +507,13 @@ void loop() {
       digitalWrite(motorPin3, LOW);
       digitalWrite(motorPin4, LOW);
 
-      digitalWrite(LED_BUILTIN, HIGH); // встроенный светодиод: HIGH - выкл, LOW - вкл
+      //digitalWrite(LED_BUILTIN, HIGH); // встроенный светодиод: HIGH - выкл, LOW - вкл
     }
 
     // Команда ВВЕРХ - вручную
     if (motor_go_up)
     {
-      digitalWrite(LED_BUILTIN, LOW); // встроенный светодиод: HIGH - выкл, LOW - вкл
+      //digitalWrite(LED_BUILTIN, LOW); // встроенный светодиод: HIGH - выкл, LOW - вкл
       motor_go_up = 0;
       motor_go_down = 0;
       motor_rotate = 1;
@@ -439,7 +526,7 @@ void loop() {
     // Команда ВНИЗ - вручную
     if (motor_go_down)
     {
-      digitalWrite(LED_BUILTIN, LOW); // встроенный светодиод: HIGH - выкл, LOW - вкл
+      //digitalWrite(LED_BUILTIN, LOW); // встроенный светодиод: HIGH - выкл, LOW - вкл
       motor_go_up = 0;
       motor_go_down = 0;
       motor_rotate = 1;
@@ -451,8 +538,19 @@ void loop() {
 
     //if (debug == 1) Serial.println(String(currentHour)+":"+String(currentMinute));
 
+
+
+    // Команда ВВЕРХ - вручную RF
+    if (btn_pressed_A) motor_go_up = 1;
+
+    // Команда ВНИЗ - вручную RF
+    if (btn_pressed_B) motor_go_down = 1;
+
+
+
+
     // Команда ВВЕРХ - по времени
-    if (currentHour == hh_up && currentMinute == mm_up && alarm_block == false) {
+    if (night_alarm == true && currentHour == hh_up && currentMinute == mm_up && alarm_block == false) {
       if (motor_rotate) {
         if (debug == 1) Serial.println("UP alarm is canceled");
       }
@@ -466,7 +564,7 @@ void loop() {
 
 
     // Команда ВНИЗ - по времени
-    if (currentHour == hh_down && currentMinute == mm_down  && alarm_block == false) {
+    if (night_alarm == true && currentHour == hh_down && currentMinute == mm_down  && alarm_block == false) {
       if (motor_rotate) {
         if (debug == 1) Serial.println("DOWN alarm is canceled");
       }
@@ -509,8 +607,8 @@ void mqtt_call()
   // подключаемся к MQTT серверу
   if (WiFi.status() == WL_CONNECTED && millis() - mqtt_timer > mqtt_delay)
   {
-    mqtt_timer = millis();
-    if (!client.connected())
+    mqtt_timer = millis(); // сброс таймера
+    if (!client.connected() && (mqtt_err_counter < mqtt_number_of_trying))
     {
       if (debug == 1) Serial.print("Connecting to MQTT server ");
       if (debug == 1) Serial.print(mqtt_server);
@@ -519,6 +617,7 @@ void mqtt_call()
       if (client.connect(mqtt_unique_client_id))
       {
         if (debug == 1) Serial.println("Connected to MQTT server ");
+        mqtt_err_counter = 0; // сброс счетчика ошибок в случае успешного подключения
 
         client.set_callback(callback);
         // подписываемся под топики
@@ -551,6 +650,8 @@ void mqtt_call()
       else
       {
         if (debug == 1) Serial.println("Could not connect to MQTT server");
+        mqtt_err_counter++;
+        if (mqtt_err_counter == mqtt_number_of_trying) Serial.println("!!!_Stop trying to connect MQTT server_!!!");
       }
     }
 
@@ -569,7 +670,6 @@ void refreshData() {
   //client.publish("motor_man_control", String(motor_man_control));
   //client.publish("motor_go_up", String(motor_go_up));
   //client.publish("motor_go_down", String(motor_go_down));
-  //client.publish("timer", String(constrain(delay_ms - (millis() - timer), 0, delay_ms)));
 
   client.publish("hh_up", String(hh_up));
   client.publish("mm_up", String(mm_up));
