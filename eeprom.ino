@@ -28,7 +28,17 @@ void eeprom_init() // инициализация EEPROM (чтение или з�
 
   EEPROM.get(init_key_address, init_key_fact); // Прочитаем ключ, хранящийся в EEPROM на момент включения питания
 
-  if (init_key_req == init_key_fact) eeprom_read(); // читаем данные из EEPROM
+  if (init_key_req == init_key_fact)
+  {
+    eeprom_read(); // читаем данные из EEPROM
+
+    hh_up_from_outside = hh_up;
+    mm_up_from_outside = mm_up;
+    hh_down_from_outside = hh_down;
+    mm_down_from_outside = mm_down;
+    speed_from_outside = motor_man_speed;
+    night_alarm_from_outside = night_alarm;
+  }
   else {
     if (debug == 1) Serial.println("Init EEPROM... (readed key is " + String(init_key_fact) + ")");
     EEPROM.put(init_key_address, init_key_req); // запишем в EEPROM ключ
@@ -66,6 +76,7 @@ void eeprom_read() // чтение данных из EEPROM
   if (debug == 1) Serial.println("  motor_man_speed = " + String(motor_man_speed));
   if (debug == 1) Serial.println("  max_rotating_time = " + String(max_rotating_time));
   if (debug == 1) Serial.println("  calibrated_speed = " + String(calibrated_speed));
+  if (debug == 1) Serial.println();
 
 }
 
@@ -73,7 +84,7 @@ void eeprom_read() // чтение данных из EEPROM
 
 void eeprom_update() // запись данных в EEPROM
 {
-  if (debug == 1) Serial.println("Updating EEPROM...");
+  if (debug == 1) Serial.print("Updating EEPROM...");
   //EEPROM.put(OTA_on_address,  OTA_on);
   //EEPROM.put(MQTT_on_address, MQTT_on);
   //EEPROM.put(WIFI_on_address, WIFI_on);
@@ -91,6 +102,7 @@ void eeprom_update() // запись данных в EEPROM
   EEPROM.put(calibrated_speed_address, calibrated_speed);
 
   EEPROM.commit();
+  if (debug == 1) Serial.println("ok");
 
   request_eeprom_update = false; // сброс признака необходимости записи в eeprom
 }

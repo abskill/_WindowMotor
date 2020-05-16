@@ -37,11 +37,11 @@ byte mqtt_err_counter = 0;       // Счетчик ошибок подлючен
 byte mqtt_number_of_trying = 10; // Максимальное количество попыток подключения
 uint32_t mqtt_refresh_time = 500; // интервал обмена с MQTT сервером (мс)
 uint32_t mqtt_timer = 0; // вспомогательный таймер
-
+bool mqtt_sending_request = true; //
 
 bool WIFI_on = true;
 byte wifi_err_counter = 0;
-uint32_t delay_of_trying_to_connect_wf = 60000 * 10; // пауза между попытками соединиться по WiFi
+uint32_t delay_of_trying_to_connect_wf = 60000;// * 10; // пауза между попытками соединиться по WiFi
 uint32_t timer_of_trying_to_connect_wf = millis(); // вспомогательный таймер
 
 bool night_alarm = true; // Включение авто-режима (по времени)
@@ -77,6 +77,14 @@ byte current_direction = 0; // Текущее направление
 byte $UP = 1;
 byte $DOWN = 2;
 byte $UNKNOWN = 0;
+
+
+
+byte current_position_old = current_position; // Предыдущая позиция ($UP, $DOWN, $UNKNOWN)
+bool motor_rotate_old = motor_rotate;
+
+String current_position_out = "UNKNOWN";
+String motor_rotate_out = String(motor_rotate);
 
 
 
@@ -152,11 +160,12 @@ const char *mqtt_server = "broker.hivemq.com"; // Имя сервера MQTT
 const int mqtt_port = 1883; // Порт для подключения к серверу MQTT
 const char *mqtt_user = ""; // Логи для подключения к серверу MQTT
 const char *mqtt_pass = ""; // Пароль для подключения к серверу MQTT
-const char *mqtt_unique_client_id = "arduinoClient_WindowMotor"; // Уникальный идентификатор
+const char *mqtt_unique_client_id = "arduinoClient_WindowMotor113"; // Уникальный идентификатор
 
 #define BUFFER_SIZE 100
 WiFiClient wclient;
-PubSubClient client(wclient, mqtt_server, mqtt_port);
+//PubSubClient client(wclient,mqtt_server, mqtt_port);
+PubSubClient client(wclient);
 int tm = 300;
 float temp = 0;
 
@@ -191,6 +200,9 @@ String months[12] = {"January", "February", "March", "April", "May", "June", "Ju
 // GMT 0 = 0
 uint32_t GMT_plus4 = 14400; // Ulyanovsk
 
+String up_time_from_outside = "";
+String down_time_from_outside = "";
+bool change_time = false;
 
 // RF 433 // -------------------------------------------------------
 
@@ -274,12 +286,22 @@ void setup() {
 
 
   // Инициализация EEPROM -------------------------------------------
+
   eeprom_init(); // чтение или запись, в зависимости от значения уникального ключа
 
 
+
   // настариваем скорость и направление движения мотора // ----------
+
   stepper1.setMaxSpeed(1000.0);
   stepper1.setSpeed(motor_man_speed);
+
+  // TIME // ---------------------------------------------------------
+
+  // Initialize a NTPClient to get time
+  timeClient.begin();
+  timeClient.setTimeOffset(GMT_plus4);
+
 
   // Коннектимся к WiFi // -----------------------------------------
 
@@ -293,7 +315,7 @@ void setup() {
       if (debug == 1) Serial.println("fail");
 
       wf_is_connected = false;
-      timer_of_trying_to_connect_wf = millis();
+      //timer_of_trying_to_connect_wf = millis();
       wifi_err_counter++;
       //      digitalWrite(rfPowerPin, HIGH); // временно выкл RF-приемник
     }
@@ -302,7 +324,9 @@ void setup() {
       if (debug == 1) Serial.println("ok");
       wf_is_connected = true;
 
-      timeClient.update(); // обновление вркмени с сервера
+      //timer_of_trying_to_connect_wf = millis();
+
+      timeClient.update(); // обновление времени с сервера
       if (RF_on) digitalWrite(rfPowerPin, HIGH); // вкл RF-приемник после подключения к WiFi
     }
   }
@@ -325,12 +349,6 @@ void setup() {
   if (debug == 1) Serial.println("Started position = " + String(current_position) + "    /1-up, 2-down, else unknown/");
 
 
-  // TIME // ---------------------------------------------------------
-
-  // Initialize a NTPClient to get time
-  timeClient.begin();
-  timeClient.setTimeOffset(GMT_plus4);
-
 
 
   // инициализируем приемник rf433
@@ -340,6 +358,7 @@ void setup() {
 
   // Сброс таймера
   //  timer = millis();
+
 
 }
 
@@ -354,6 +373,8 @@ void loop() {
   if (WIFI_on) {
     if (wf_is_connected == false) {
       if (wifi_err_counter < 5 && (millis() - timer_of_trying_to_connect_wf) > delay_of_trying_to_connect_wf) {
+        timer_of_trying_to_connect_wf = millis();
+
         // try_to_connect_wf(wf_is_connected);
         if (debug == 1) Serial.print("Connecting to wifi...");
         //digitalWrite(LED_BUILTIN, HIGH);
@@ -364,7 +385,7 @@ void loop() {
         {
           if (debug == 1) Serial.println("fail");
           wf_is_connected = false;
-          timer_of_trying_to_connect_wf = millis();
+          //          timer_of_trying_to_connect_wf = millis();
           wifi_err_counter++;
         }
         else
@@ -373,6 +394,8 @@ void loop() {
           wf_is_connected = true;
           wifi_err_counter = 0; // сброс счетчика ошибок в случае успешного подключения
 
+          //       timer_of_trying_to_connect_wf = millis();
+
           timeClient.update(); // обновление вркмени с сервера
           if (RF_on) digitalWrite(rfPowerPin, HIGH); // вкл RF-приемник после подключения к WiFi
         }
@@ -380,6 +403,13 @@ void loop() {
       }
 
     }
+
+    if ( wf_is_connected && (WiFi.status() != WL_CONNECTED) ) {
+      if (debug && wf_is_connected) Serial.println("(!) WIFI-connection WAS RUINED");
+      wf_is_connected = false;
+    }
+
+
 
     if (wf_is_connected == true) {
       if (MQTT_on) mqtt_call();
@@ -421,7 +451,7 @@ void loop() {
         //if (debug == 1) Serial.println("Epoch Time: " + String(epochTime));
 
         String formattedTime = timeClient.getFormattedTime();
-        if (debug == 1) Serial.println("Formatted Time: " + String(formattedTime));
+        //if (debug == 1) Serial.println("Formatted Time: " + String(formattedTime));
 
         currentHour = timeClient.getHours();
         currentMinute = timeClient.getMinutes();
@@ -458,28 +488,56 @@ void loop() {
 
   // Применение внешних настроек // ---------------------------------------------
 
-  if (hh_up != hh_up_from_outside or
-      mm_up != mm_up_from_outside or
-      hh_down != hh_down_from_outside or
-      mm_down != mm_down_from_outside or
-      motor_man_speed != speed_from_outside)
-  {
+  if (change_time) {
+    String temp_string = ""; // временная переменная
 
+    // Парсинг up_time
+    temp_string = up_time_from_outside.substring(0, up_time_from_outside.indexOf(":"));
+    hh_up_from_outside = temp_string.toInt();
+
+    temp_string = up_time_from_outside.substring(up_time_from_outside.indexOf(":") + 1);
+    mm_up_from_outside = temp_string.toInt();
+
+    // Парсинг down_time
+    temp_string = down_time_from_outside.substring(0, down_time_from_outside.indexOf(":"));
+    hh_down_from_outside = temp_string.toInt();
+
+    temp_string = down_time_from_outside.substring(down_time_from_outside.indexOf(":") + 1);
+    mm_down_from_outside = temp_string.toInt();
+
+    change_time = false;
+  }
+
+
+  if ( hh_up != hh_up_from_outside or
+       mm_up != mm_up_from_outside or
+       hh_down != hh_down_from_outside or
+       mm_down != mm_down_from_outside or
+       motor_man_speed != speed_from_outside or
+       night_alarm != night_alarm_from_outside )
+  {
     // Обновим переменные
     hh_up = hh_up_from_outside;
     mm_up = mm_up_from_outside;
-
     hh_down = hh_down_from_outside;
     mm_down = mm_down_from_outside;
-
     motor_man_speed = speed_from_outside;
+    night_alarm = night_alarm_from_outside;
 
-    // Установим признак необходимости обновления данных в EEPROM
+    // Признак необходимости обновления данных в EEPROM
     request_eeprom_update = true;
+
+    // Признак необходимости обновления данных у MQTT-брокера
+    mqtt_sending_request = true;
   }
 
+
   // Обновим данные в EEPROM, когда двигатель не вращается (т.е. отсутсвуют просадки по питанию)
-  if (request_eeprom_update && motor_rotate == false) eeprom_update;
+  if (request_eeprom_update && motor_rotate == false)
+  {
+    eeprom_update(); // обновление данных в eeprom
+    request_eeprom_update = false; // сброс признака необходимости записи в eeprom
+  }
 
 
 
@@ -500,24 +558,24 @@ void loop() {
 
 
 
-  // Калибровка количества шагов ---------------------------------------
+  // Калибровка максимального времени вращения ---------------------------------------
 
   if (calibrate_on)
   {
     // шаг 1: Запускаем движение в нижнюю позицию
-    if (current_position != $DOWN && motor_rotate == false && start_pos_is_calibrated == false) 
+    if (current_position != $DOWN && motor_rotate == false && start_pos_is_calibrated == false)
     {
-    motor_go_down = true;
-    if (debug == 1) Serial.println("Calibration_STEP_1");
+      motor_go_down = true;
+      if (debug == 1) Serial.println("Calibration_STEP_1");
     }
-    
+
     // шаг 2: Стартуем таймер и запускаем движение в верхниюю позицию
     if (current_position == $DOWN && motor_rotate == false && start_pos_is_calibrated == false) {
       //stepper1.setCurrentPosition( stepper1.currentPosition() )
       calibration_timer = millis(); // стартуем таймер
       motor_go_up = true; // запускаем движение
       start_pos_is_calibrated = true; // разблокируем шаг 3
-    if (debug == 1) Serial.println("Calibration_STEP_2");
+      if (debug == 1) Serial.println("Calibration_STEP_2");
     }
 
     // шаг 3: Определяем пройденное время, запоминаем и выключаем режим калибровки
@@ -658,12 +716,44 @@ void loop() {
     {
       motor_rotate = false;
       if (debug == 1) Serial.println("STOP by max_rotating_time");
+
+      if (current_direction == $UP) current_position = $UP;
+      if (current_direction == $DOWN) current_position = $DOWN;
     }
 
   }
 
-}
 
+
+
+  if (current_position == $UP)   current_position_out = "Открыта";
+  else if (current_position == $DOWN)  current_position_out = "Закрыта";
+  else
+  {
+    if (motor_rotate) {
+      if (current_direction == $UP) current_position_out = "Подъем";
+      if (current_direction == $DOWN) current_position_out = "Спуск";
+    }
+    else  {
+      current_position_out = "?";
+    }
+  }
+
+  motor_rotate_out = String(motor_rotate);
+
+
+  if (current_position_old != current_position)  {
+    current_position_old = current_position;
+    mqtt_sending_request = true;
+  }
+
+  if (motor_rotate_old != motor_rotate)  {
+    motor_rotate_old = motor_rotate;
+    mqtt_sending_request = true;
+  }
+
+
+}
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
