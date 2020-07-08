@@ -59,8 +59,8 @@ void mqtt_call() {
         if (debug == 1) Serial.println("fail");
         mqtt_err_counter++;
         
-        current_status = "MQTT error #"+String(mqtt_err_counter);
-        current_status_cr = true;
+        error_status = "MQTT error #"+String(mqtt_err_counter);
+        error_status_cr = true;
 
         if (mqtt_err_counter == mqtt_number_of_trying)
         {
@@ -137,6 +137,12 @@ void refreshData() {
     client.publish("wm:current_status", current_status.c_str(), true);
     current_status_cr = false;
   }
+
+  if (error_status_cr) {
+    client.publish("wm:error_status", error_status.c_str(), true);
+    error_status_cr = false;
+  }
+    
   mqtt_sending_request = false;
   //}
 

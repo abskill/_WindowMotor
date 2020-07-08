@@ -49,10 +49,15 @@ void eeprom_init() // инициализация EEPROM (чтение или з�
     mm_up_weekend_from_outside = mm_up_weekend;
     hh_down_weekend_from_outside = hh_down_weekend;
     mm_down_weekend_from_outside = mm_down_weekend;
+
+    up_time_in = time2string(hh_up, mm_up);
+    down_time_in = time2string(hh_down, mm_down);
+    up_time_weekend_in = time2string(hh_up_weekend, mm_up_weekend);
+    down_time_weekend_in = time2string(hh_down_weekend, mm_down_weekend);
   }
   else // А если ключ невалидный, то инициализируем данные в EEPROM начальными значениями
   {
-    if (debug) Serial.println("Init EEPROM... (readed key is " + String(init_key_fact) + ")");
+    if (debug) Serial.println("Init EEPROM... (because readed key is " + String(init_key_fact) + ")");
     EEPROM.put(init_key_address, init_key_req); // запишем в EEPROM ключ
     EEPROM.commit();
     eeprom_update(); // запишем в EEPROM остальные даннные

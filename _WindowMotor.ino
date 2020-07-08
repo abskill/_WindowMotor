@@ -1,7 +1,7 @@
 
 // by Melnikov Anton
 
-bool debug = 1; // Serial.print если = 1
+bool debug = 0; // Serial.print если = 1
 
 // Pins // -----------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------------------
@@ -144,6 +144,7 @@ String up_time_weekend_out = "";
 String down_time_weekend_out = "";
 
 String current_status = "?"; // Текущее состояние
+String error_status = "Ошибок нет"; // Текущее состояние
 
 // INPUT Parameters
 bool time_command_in = time_command;
@@ -156,6 +157,7 @@ float motor_speed_in = motor_speed;
 // Change Request Variables
 bool online_cr = true;
 bool current_status_cr = true;
+bool error_status_cr = true;
 bool time_command_cr = true;
 bool up_time_cr = true;
 bool down_time_cr = true;
@@ -168,7 +170,7 @@ bool calibrated_speed_cr = true;
 
 
 String current_status_old = current_status;
-
+String error_status_old = error_status;
 
 // Serial Port // ----------------------------------------------------------------------------------
 
@@ -424,8 +426,8 @@ void loop() {
           wf_is_connected = false;
           //          timer_of_trying_to_connect_wf = millis();
           wifi_err_counter++;
-          current_status = "WIFI error #" + String(wifi_err_counter);
-          current_status_cr = true;
+          error_status = "WIFI error #" + String(wifi_err_counter);
+          error_status_cr = true;
 
           if (wifi_err_counter == wifi_number_of_trying) {
             delay_of_trying_to_connect_wf *= 10;
@@ -452,8 +454,8 @@ void loop() {
       if (debug && wf_is_connected) Serial.println("!_WIFI-connection was ruined_!");
       wf_is_connected = false;
 
-      current_status = "WIFI was ruined";
-      current_status_cr = true;
+      error_status = "WIFI was ruined";
+      error_status_cr = true;
     }
 
 
@@ -614,11 +616,11 @@ void loop() {
   //  }
 
   // Определим необходимость обновления данных в eeprom
-  if (online_cr  or  current_status_cr  or  time_command_cr  or
+  if (online_cr  or  current_status_cr or  error_status_cr  or  time_command_cr  or
       up_time_cr  or  down_time_cr  or  up_time_weekend_cr  or  down_time_weekend_cr)
   {
     request_eeprom_update = true;
-    if (debug) Serial.println("request_eeprom_update-" + String(online_cr) + String(current_status_cr) + String(time_command_cr) + String(up_time_cr) + String(down_time_cr) + String(up_time_weekend_cr) + String(down_time_weekend_cr));
+    if (debug) Serial.println("request_eeprom_update-" + String(online_cr) + String(current_status_cr) + String(error_status_cr) + String(time_command_cr) + String(up_time_cr) + String(down_time_cr) + String(up_time_weekend_cr) + String(down_time_weekend_cr));
   }
 
   // Обновим данные в EEPROM, когда двигатель не вращается (т.е. отсутсвуют просадки по питанию)
@@ -850,6 +852,12 @@ void loop() {
     current_status_cr = true;
     current_status_old = current_status;
   }
+
+  if (error_status_old != error_status)
+  {
+    error_status_cr = true;
+    error_status_old = error_status;
+  }  
   //motor_rotate_out = String(motor_rotate);
 
   /*
