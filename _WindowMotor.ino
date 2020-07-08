@@ -1,7 +1,7 @@
 
 // by Melnikov Anton
 
-bool debug = 0; // Serial.print если = 1
+bool debug = 1; // Serial.print если = 1
 
 // Pins // -----------------------------------------------------------------------------------------
 // -------------------------------------------------------------------------------------------------
@@ -32,20 +32,27 @@ bool debug = 0; // Serial.print если = 1
 bool OTA_on = true; // Включение прощивки "по-воздуху"
 uint32_t OTA_timeout = 300000; // После истечения этого времени (мс) с момента подачи питания режим будет выключен
 
+
 bool MQTT_on = true;
 byte mqtt_err_counter = 0;       // Счетчик ошибок подлючения
 byte mqtt_number_of_trying = 10; // Максимальное количество попыток подключения
-uint32_t mqtt_refresh_time = 500; // интервал обмена с MQTT сервером (мс)
-uint32_t mqtt_timer = 0; // вспомогательный таймер
+//uint32_t mqtt_refresh_time = 00; // интервал обмена с MQTT сервером (мс)
+//uint32_t mqtt_timer = 0; // вспомогательный таймер
+uint32_t delay_of_trying_to_connect_mqtt = 60000;// * 10; // пауза между попытками соединиться по WiFi
+uint32_t timer_of_trying_to_connect_mqtt = millis(); // вспомогательный таймер
+
 bool mqtt_sending_request = true; //
+
 
 bool WIFI_on = true;
 byte wifi_err_counter = 0;
+byte wifi_number_of_trying = 5; // Максимальное количество попыток подключения
+
 uint32_t delay_of_trying_to_connect_wf = 60000;// * 10; // пауза между попытками соединиться по WiFi
 uint32_t timer_of_trying_to_connect_wf = millis(); // вспомогательный таймер
 
-bool night_alarm = true; // Включение авто-режима (по времени)
-bool night_alarm_from_outside = night_alarm; //
+bool time_command = true; // Включение авто-режима (по времени)
+//bool time_command_in = time_command; //
 
 bool RF_on = true; // Включение RF433 приемника
 
@@ -56,13 +63,13 @@ bool motor_rotate = false; // вращение мотора
 bool motor_go_up = false;
 bool motor_go_down = false;
 
-float motor_man_speed = 800;  // скорость мотора (0...1000)
-float speed_from_outside = motor_man_speed;  // скорость мотора из брокера
+float motor_speed = 800;  // скорость мотора (0...1000)
+//float motor_speed_in = motor_speed;  // скорость мотора из брокера
 
 
 //uint32_t max_steps = 0; // количество шагов между крайними положениями
 //bool max_steps_calibrated = false; // признак успешной калибровки max_steps
-bool calibrate_on = false; // включение режима калибровки максимального количества шагов
+bool calibrate_command = false; // включение режима калибровки максимального количества шагов
 bool start_pos_is_calibrated = false; // признак перехода к 3-му шагу калибровки
 float calibrated_speed = 0; // значение скорости, на которой производилась калибровка
 uint32_t calibration_timer = 0; //
@@ -79,12 +86,9 @@ byte $DOWN = 2;
 byte $UNKNOWN = 0;
 
 
+//byte current_position_old = current_position; // Предыдущая позиция ($UP, $DOWN, $UNKNOWN)
+//bool motor_rotate_old = motor_rotate;
 
-byte current_position_old = current_position; // Предыдущая позиция ($UP, $DOWN, $UNKNOWN)
-bool motor_rotate_old = motor_rotate;
-
-String current_position_out = "UNKNOWN";
-String motor_rotate_out = String(motor_rotate);
 
 
 
@@ -96,11 +100,29 @@ uint32_t calculate_time_delay = 500; // Интервал (мс) запроса �
 uint32_t calculate_time_timer = millis(); // вспомогательный таймер
 
 
-byte hh_down = 14; // Время закрытия шторы
-byte mm_down = 48;
+byte hh_down = 22; // Время закрытия
+byte mm_down = 00;
 
-byte hh_up = 14; // Время открытия шторы
-byte mm_up = 50;
+byte hh_up = 07; // Время открытия
+byte mm_up = 00;
+
+
+byte hh_down_weekend = 23; // Время закрытия
+byte mm_down_weekend = 00;
+
+byte hh_up_weekend = 10; // Время открытия
+byte mm_up_weekend = 00;
+
+byte hh_up_from_outside = hh_up; // Для перенастройки времени открытия
+byte mm_up_from_outside = mm_up;
+byte hh_down_from_outside = hh_down;  // Для перенастройки времени закрытия
+byte mm_down_from_outside = mm_down;
+
+byte hh_up_weekend_from_outside = hh_up_weekend; // Для перенастройки времени открытия
+byte mm_up_weekend_from_outside = mm_up_weekend;
+byte hh_down_weekend_from_outside = hh_down_weekend;  // Для перенастройки времени закрытия
+byte mm_down_weekend_from_outside = mm_down_weekend;
+
 
 byte hh_time_request = 02; // Время, в которое будет происходить уточнение текущего времени с сервера (лучше ночью)
 byte mm_time_request = 00; // (корректировка будет происходить многократно в течение минуты)
@@ -109,11 +131,43 @@ int currentHour = -1;  // переменные, в которых будет х�
 int currentMinute = -1;
 int currentSecond = -1;
 
-byte hh_up_from_outside = hh_up; // Для перенастройки времени открытия шторы
-byte mm_up_from_outside = mm_up;
 
-byte hh_down_from_outside = hh_down;  // Для перенастройки времени закрытия шторы
-byte mm_down_from_outside = mm_down;
+//String up_time_in = "";
+//String down_time_in = "";
+bool change_time = false; // Принято новое значение времени
+
+// OUTPUT Parameters
+bool time_command_out = false; // вкл/выкл команд по установленному времени
+String up_time_out = "";
+String down_time_out = "";
+String up_time_weekend_out = "";
+String down_time_weekend_out = "";
+
+String current_status = "?"; // Текущее состояние
+
+// INPUT Parameters
+bool time_command_in = time_command;
+String up_time_in = "";
+String down_time_in = "";
+String up_time_weekend_in = "";
+String down_time_weekend_in = "";
+float motor_speed_in = motor_speed;
+
+// Change Request Variables
+bool online_cr = true;
+bool current_status_cr = true;
+bool time_command_cr = true;
+bool up_time_cr = true;
+bool down_time_cr = true;
+bool up_time_weekend_cr = true;
+bool down_time_weekend_cr = true;
+//bool motor_speed_cr = true;
+bool max_rotating_time_cr = true;
+bool calibrated_speed_cr = true;
+
+
+
+String current_status_old = current_status;
 
 
 // Serial Port // ----------------------------------------------------------------------------------
@@ -200,9 +254,7 @@ String months[12] = {"January", "February", "March", "April", "May", "June", "Ju
 // GMT 0 = 0
 uint32_t GMT_plus4 = 14400; // Ulyanovsk
 
-String up_time_from_outside = "";
-String down_time_from_outside = "";
-bool change_time = false;
+String weekDay = ""; // День недели
 
 // RF 433 // -------------------------------------------------------
 
@@ -227,47 +279,30 @@ int btn_value = 0;  // значение кода кнопки
 
 #include <EEPROM.h>
 
-// Задаем адреса в EEPROM
-/*
-  byte EEMEM init_key_address;
-  //bool EEMEM OTA_on_address;
-  //bool EEMEM MQTT_on_address;
-  //bool EEMEM WIFI_on_address;
-  //bool EEMEM RF_on_address;
-  bool EEMEM night_alarm_address;
-  byte EEMEM hh_down_address;
-  byte EEMEM mm_down_address;
-  byte EEMEM hh_up_address;
-  byte EEMEM mm_up_address;
-  float    EEMEM motor_man_speed_address;
-  uint32_t EEMEM max_steps_address;
-*/
-
-
-
-
 byte init_key_req = 11; // Уникальный (для каждого проекта) ключ инициализации EEPROM [1..254]
-byte init_key_fact = 0; // Ключ, хранящийся в EEPROM на момент включения питания
+byte init_key_fact = 0; // Переменная, в которую будет записан ключ, хранящийся в EEPROM на момент включения питания
 bool request_eeprom_update = false; // Признак необходимости обновления данных в EEPROM
 
-
+// Задаем адреса в EEPROM
 byte init_key_address = 0;
-byte night_alarm_address = 0;
+byte time_command_address = 0;
 byte hh_down_address = 0;
 byte mm_down_address = 0;
 byte hh_up_address = 0;
 byte mm_up_address = 0;
-byte motor_man_speed_address = 0;
+byte motor_speed_address = 0;
 byte max_rotating_time_address = 0;
 byte calibrated_speed_address = 0;
+byte hh_down_weekend_address = 0;
+byte mm_down_weekend_address = 0;
+byte hh_up_weekend_address = 0;
+byte mm_up_weekend_address = 0;
 
 
 // --------------------------------------------------------------------------------------------------------------
 // SETUP // -----------------------------------------------------------------------------------------------------
 
 void setup() {
-
-
 
   // initialize serial communication -------------------------------
   if (debug == 1)  Serial.begin(serialRate);
@@ -294,7 +329,7 @@ void setup() {
   // настариваем скорость и направление движения мотора // ----------
 
   stepper1.setMaxSpeed(1000.0);
-  stepper1.setSpeed(motor_man_speed);
+  stepper1.setSpeed(motor_speed);
 
   // TIME // ---------------------------------------------------------
 
@@ -372,7 +407,9 @@ void loop() {
   // Активности WiFi // ----------------------------------------------
   if (WIFI_on) {
     if (wf_is_connected == false) {
-      if (wifi_err_counter < 5 && (millis() - timer_of_trying_to_connect_wf) > delay_of_trying_to_connect_wf) {
+      online_cr = true; // установим необходимость сообщения статуса после успешного подключения к wifi
+
+      if ((millis() - timer_of_trying_to_connect_wf) > delay_of_trying_to_connect_wf) {
         timer_of_trying_to_connect_wf = millis();
 
         // try_to_connect_wf(wf_is_connected);
@@ -387,12 +424,19 @@ void loop() {
           wf_is_connected = false;
           //          timer_of_trying_to_connect_wf = millis();
           wifi_err_counter++;
+          current_status = "WIFI error #" + String(wifi_err_counter);
+          current_status_cr = true;
+
+          if (wifi_err_counter == wifi_number_of_trying) {
+            delay_of_trying_to_connect_wf *= 10;
+            if (debug) Serial.println("!_Increase interval of trying to connect wifi_!");
+          }
         }
         else
         {
           if (debug == 1) Serial.println("ok");
           wf_is_connected = true;
-          wifi_err_counter = 0; // сброс счетчика ошибок в случае успешного подключения
+          //wifi_err_counter = 0; // сброс счетчика ошибок в случае успешного подключения
 
           //       timer_of_trying_to_connect_wf = millis();
 
@@ -405,13 +449,16 @@ void loop() {
     }
 
     if ( wf_is_connected && (WiFi.status() != WL_CONNECTED) ) {
-      if (debug && wf_is_connected) Serial.println("(!) WIFI-connection WAS RUINED");
+      if (debug && wf_is_connected) Serial.println("!_WIFI-connection was ruined_!");
       wf_is_connected = false;
+
+      current_status = "WIFI was ruined";
+      current_status_cr = true;
     }
 
 
 
-    if (wf_is_connected == true) {
+    if (wf_is_connected) {
       if (MQTT_on) mqtt_call();
 
 
@@ -451,7 +498,6 @@ void loop() {
         //if (debug == 1) Serial.println("Epoch Time: " + String(epochTime));
 
         String formattedTime = timeClient.getFormattedTime();
-        //if (debug == 1) Serial.println("Formatted Time: " + String(formattedTime));
 
         currentHour = timeClient.getHours();
         currentMinute = timeClient.getMinutes();
@@ -468,6 +514,9 @@ void loop() {
           String currentMonthName = months[currentMonth-1];
           int currentYear = ptm->tm_year+1900;
         */
+
+        weekDay = weekDays[timeClient.getDay()];
+        //if (debug == 1) Serial.println("Formatted Time: " + String(formattedTime) + " // " + String(weekDay));
 
         calculate_time_timer = millis();
       }
@@ -492,54 +541,92 @@ void loop() {
     String temp_string = ""; // временная переменная
 
     // Парсинг up_time
-    temp_string = up_time_from_outside.substring(0, up_time_from_outside.indexOf(":"));
+    temp_string = up_time_in.substring(0, up_time_in.indexOf(":"));
     hh_up_from_outside = temp_string.toInt();
 
-    temp_string = up_time_from_outside.substring(up_time_from_outside.indexOf(":") + 1);
+    temp_string = up_time_in.substring(up_time_in.indexOf(":") + 1);
     mm_up_from_outside = temp_string.toInt();
 
     // Парсинг down_time
-    temp_string = down_time_from_outside.substring(0, down_time_from_outside.indexOf(":"));
+    temp_string = down_time_in.substring(0, down_time_in.indexOf(":"));
     hh_down_from_outside = temp_string.toInt();
 
-    temp_string = down_time_from_outside.substring(down_time_from_outside.indexOf(":") + 1);
+    temp_string = down_time_in.substring(down_time_in.indexOf(":") + 1);
     mm_down_from_outside = temp_string.toInt();
+
+    // Парсинг up_time_weekend
+    temp_string = up_time_weekend_in.substring(0, up_time_weekend_in.indexOf(":"));
+    hh_up_weekend_from_outside = temp_string.toInt();
+
+    temp_string = up_time_weekend_in.substring(up_time_weekend_in.indexOf(":") + 1);
+    mm_up_weekend_from_outside = temp_string.toInt();
+
+    // Парсинг down_time_weekend
+    temp_string = down_time_weekend_in.substring(0, down_time_weekend_in.indexOf(":"));
+    hh_down_weekend_from_outside = temp_string.toInt();
+
+    temp_string = down_time_weekend_in.substring(down_time_weekend_in.indexOf(":") + 1);
+    mm_down_weekend_from_outside = temp_string.toInt();
 
     change_time = false;
   }
 
 
-  if ( hh_up != hh_up_from_outside or
-       mm_up != mm_up_from_outside or
-       hh_down != hh_down_from_outside or
-       mm_down != mm_down_from_outside or
-       motor_man_speed != speed_from_outside or
-       night_alarm != night_alarm_from_outside )
-  {
-    // Обновим переменные
+  if ( hh_up != hh_up_from_outside  or  mm_up != mm_up_from_outside ) {
     hh_up = hh_up_from_outside;
     mm_up = mm_up_from_outside;
+    up_time_cr = true;
+  }
+  if ( hh_down != hh_down_from_outside  or  mm_down != mm_down_from_outside ) {
     hh_down = hh_down_from_outside;
     mm_down = mm_down_from_outside;
-    motor_man_speed = speed_from_outside;
-    night_alarm = night_alarm_from_outside;
-
-    // Признак необходимости обновления данных в EEPROM
-    request_eeprom_update = true;
-
-    // Признак необходимости обновления данных у MQTT-брокера
-    mqtt_sending_request = true;
+    down_time_cr = true;
   }
 
+  if ( hh_up_weekend != hh_up_weekend_from_outside  or  mm_up_weekend != mm_up_weekend_from_outside ) {
+    hh_up_weekend = hh_up_weekend_from_outside;
+    mm_up_weekend = mm_up_weekend_from_outside;
+    up_time_weekend_cr = true;
+  }
+  if ( hh_down_weekend != hh_down_weekend_from_outside  or  mm_down_weekend != mm_down_weekend_from_outside ) {
+    hh_down_weekend = hh_down_weekend_from_outside;
+    mm_down_weekend = mm_down_weekend_from_outside;
+    down_time_weekend_cr = true;
+  }
+
+  if ( time_command != time_command_in ) {
+    time_command = time_command_in;
+    time_command_cr = true;
+  }
+
+  if ( motor_speed != motor_speed_in ) {   // не выдается наружу
+    motor_speed = motor_speed_in;
+    request_eeprom_update = true;
+  }
+
+  //  {
+
+  // Признак необходимости обновления данных в EEPROM
+  //request_eeprom_update = true;
+
+  // Признак необходимости обновления данных у MQTT-брокера
+  //mqtt_sending_request = true;
+  //  }
+
+  // Определим необходимость обновления данных в eeprom
+  if (online_cr  or  current_status_cr  or  time_command_cr  or
+      up_time_cr  or  down_time_cr  or  up_time_weekend_cr  or  down_time_weekend_cr)
+  {
+    request_eeprom_update = true;
+    if (debug) Serial.println("request_eeprom_update-" + String(online_cr) + String(current_status_cr) + String(time_command_cr) + String(up_time_cr) + String(down_time_cr) + String(up_time_weekend_cr) + String(down_time_weekend_cr));
+  }
 
   // Обновим данные в EEPROM, когда двигатель не вращается (т.е. отсутсвуют просадки по питанию)
-  if (request_eeprom_update && motor_rotate == false)
+  if (request_eeprom_update  &&  motor_rotate == false)
   {
     eeprom_update(); // обновление данных в eeprom
-    request_eeprom_update = false; // сброс признака необходимости записи в eeprom
+    request_eeprom_update = false;
   }
-
-
 
   // Определение текущего положения // ---------------------------------
 
@@ -560,7 +647,7 @@ void loop() {
 
   // Калибровка максимального времени вращения ---------------------------------------
 
-  if (calibrate_on)
+  if (calibrate_command)
   {
     // шаг 1: Запускаем движение в нижнюю позицию
     if (current_position != $DOWN && motor_rotate == false && start_pos_is_calibrated == false)
@@ -582,8 +669,8 @@ void loop() {
     if (start_pos_is_calibrated && current_position == $UP && motor_rotate == false) {
       //max_steps=currentPosition()+(int)currentPosition()*0.01; // подсчитанное колличество шагов + 1%
       max_rotating_time = millis() - calibration_timer;
-      calibrate_on = false; // выключаем режим калибровки
-      calibrated_speed = motor_man_speed; // запоминаем скорость
+      calibrate_command = false; // выключаем режим калибровки
+      calibrated_speed = motor_speed; // запоминаем скорость
       eeprom_update(); // обновляем данные в EEPROM
       if (debug == 1) Serial.println("Calibration_END:  max_rotating_time = " + String(max_rotating_time) + " ms");
       start_pos_is_calibrated = false;
@@ -635,7 +722,7 @@ void loop() {
     {
       motor_rotate = true;
       current_direction = $UP;
-      stepper1.setSpeed(motor_man_speed); // Настраеваем скорость и направление движения
+      stepper1.setSpeed(motor_speed); // Настраеваем скорость и направление движения
       start_rotating_time = millis(); // Стартуем таймер
     }
     motor_go_up = 0; // команда обработана => сброс команды
@@ -652,7 +739,7 @@ void loop() {
     {
       motor_rotate = true;
       current_direction = $DOWN;
-      stepper1.setSpeed(-motor_man_speed); // Настраеваем скорость и направление движения
+      stepper1.setSpeed(-motor_speed); // Настраеваем скорость и направление движения
       start_rotating_time = millis(); // Стартуем таймер
     }
     motor_go_down = 0; // команда обработана => сброс команды
@@ -670,7 +757,10 @@ void loop() {
 
 
   // Команда ВВЕРХ - по времени
-  if (night_alarm == true && currentHour == hh_up && currentMinute == mm_up && alarm_block == false) {
+  if ( time_command == true && alarm_block == false &&
+       ( ( (weekDay != "Saturday") && (weekDay != "Sunday") && (currentHour == hh_up) && (currentMinute == mm_up) ) or
+         ( ((weekDay == "Saturday") or (weekDay == "Sunday")) && (currentHour == hh_up_weekend) && (currentMinute == mm_up_weekend) ) ) ) {
+
     if (motor_rotate) {
       if (debug == 1) Serial.println("UP alarm is canceled");
     }
@@ -682,19 +772,25 @@ void loop() {
     alarm_block = true;
   }
 
+  //Serial.println();
+  //Serial.println ( String(time_command == true) + String(alarm_block == false)  + String(weekDay != "Saturday")  + String(weekDay != "Friday")  + String(currentHour == hh_down)  + String(currentMinute == mm_down)  + String(weekDay = "Saturday")  + String(weekDay = "Friday")  + String(currentHour == hh_down_weekend)  + String(currentMinute == mm_down_weekend));
+  //Serial.println();
+
   // Команда ВНИЗ - по времени
-  if (night_alarm == true && currentHour == hh_down && currentMinute == mm_down  && alarm_block == false) {
+  if ( time_command == true && alarm_block == false &&
+       ( ( (weekDay != "Saturday") && (weekDay != "Friday") && (currentHour == hh_down) && (currentMinute == mm_down) ) or
+         ( ((weekDay == "Saturday") or (weekDay == "Friday")) && (currentHour == hh_down_weekend) && (currentMinute == mm_down_weekend) ) ) )  {
+
     if (motor_rotate) {
       if (debug == 1) Serial.println("DOWN alarm is canceled");
     }
     else {
       motor_go_down = 1;
       alarm_block_timer = millis();
-      if (debug == 1) Serial.println("DOWNP alarm");
+      if (debug == 1) Serial.println("DOWN alarm");
     }
     alarm_block = true;
   }
-
 
   // Команды ВВЕРХ, ВНИЗ, СТОП - wifi
   // поступают через MQTT-брокер в виде готовых комманд motor_go_up, motor_go_down, motor_rotate
@@ -709,7 +805,7 @@ void loop() {
 
 
   // Команда СТОП - по истечению максимального времени вращения
-  if (motor_man_speed == calibrated_speed && motor_rotate)
+  if (motor_speed == calibrated_speed && motor_rotate)
   {
     //rotating_time = millis() - start_rotating_time;
     if ((millis() - start_rotating_time) > (max_rotating_time + rotating_time_tolerance))
@@ -720,38 +816,53 @@ void loop() {
       if (current_direction == $UP) current_position = $UP;
       if (current_direction == $DOWN) current_position = $DOWN;
     }
-
   }
 
 
-
-
-  if (current_position == $UP)   current_position_out = "Открыта";
-  else if (current_position == $DOWN)  current_position_out = "Закрыта";
+  // Текущее состояние
+  if (current_position == $UP)   {
+    current_status = "Открыта";
+    //current_status_cr = true;
+  }
+  else if (current_position == $DOWN) {
+    current_status = "Закрыта";
+    //current_status_cr = true;
+  }
   else
   {
     if (motor_rotate) {
-      if (current_direction == $UP) current_position_out = "Подъем";
-      if (current_direction == $DOWN) current_position_out = "Спуск";
+      if (current_direction == $UP) {
+        current_status = "Подъем";
+        //current_status_cr = true;
+      }
+      if (current_direction == $DOWN) {
+        current_status = "Спуск";
+        //current_status_cr = true;
+      }
     }
     else  {
-      current_position_out = "?";
+      current_status = "?";
+      //current_status_cr = true;
     }
   }
-
-  motor_rotate_out = String(motor_rotate);
-
-
-  if (current_position_old != current_position)  {
-    current_position_old = current_position;
-    mqtt_sending_request = true;
+  if (current_status_old != current_status)
+  {
+    current_status_cr = true;
+    current_status_old = current_status;
   }
+  //motor_rotate_out = String(motor_rotate);
 
-  if (motor_rotate_old != motor_rotate)  {
-    motor_rotate_old = motor_rotate;
-    mqtt_sending_request = true;
-  }
+  /*
+    if (current_position_old != current_position)  {
+      current_position_old = current_position;
+      mqtt_sending_request = true;
+    }
 
+    if (motor_rotate_old != motor_rotate)  {
+      motor_rotate_old = motor_rotate;
+      mqtt_sending_request = true;
+    }
+  */
 
 }
 

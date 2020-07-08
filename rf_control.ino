@@ -2,8 +2,8 @@
 void rf_control()
 {
 
-btn_pressed_A = false;  // сброс признака нажатия кнопки
-btn_pressed_B = false;  // сброс признака нажатия кнопки
+  btn_pressed_A = false;  // сброс признака нажатия кнопки
+  btn_pressed_B = false;  // сброс признака нажатия кнопки
 
   // считываем код нажатой кнопки или 0
   if (mySwitch.available())
