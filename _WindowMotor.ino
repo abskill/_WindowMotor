@@ -7,16 +7,17 @@ bool debug = 0; // Serial.print если = 1
 // -------------------------------------------------------------------------------------------------
 
 // NodeMCU
-#define motorPin1  D5 // IN1 на 1-м драйвере ULN2003
-#define motorPin2  D6 // D6 - IN2 на 1-м драйвере ULN2003
-#define motorPin3  D7 // D7 - IN3 на 1-м драйвере ULN2003
-#define motorPin4  D8 // D8 - IN4 на 1-м драйвере ULN2003
+
+#define motorPin1  D5 // IN1 на 1-м драйвере ULN2003    //  
+#define motorPin2  D6 // IN2 на 1-м драйвере ULN2003
+#define motorPin3  D7 // IN3 на 1-м драйвере ULN2003
+#define motorPin4  D8 // IN4 на 1-м драйвере ULN2003
 
 #define magnetPinUp   D2 // Data-pin верхнего датчика
-#define magnetPinDown 10// Data-pin нижнего датчика
+#define magnetPinDown 10 // Data-pin нижнего датчика
 
-#define rfPin D1 // Data-pin RF приемника
-#define rfPowerPin D3 // D3 - Power-pin RF приемника
+#define rfPin D1      // Data-pin RF приемника
+#define rfPowerPin D3 // Power-pin RF приемника
 
 /* Управление питанием RF приемника введено, т.к. по неизвестным причинам
    WiFi не коннектится, пока включен RF приемник.
@@ -32,6 +33,7 @@ bool debug = 0; // Serial.print если = 1
 bool OTA_on = true; // Включение прощивки "по-воздуху"
 uint32_t OTA_timeout = 300000; // После истечения этого времени (мс) с момента подачи питания режим будет выключен
 
+byte motor_type = 2; // 1-шаговый мотор (4 контакта), 2-мотор постоянного тока (2 или 3 контакта)
 
 bool MQTT_on = true;
 byte mqtt_err_counter = 0;       // Счетчик ошибок подлючения
@@ -179,15 +181,15 @@ String error_status_old = error_status;
 
 
 // Step motor // ------------------------------------------------------------------------------
+/*
+  #include<AccelStepper.h>
 
-#include<AccelStepper.h>
+  #define HALFSTEP 8 // полушаговый режим
 
-#define HALFSTEP 8 // полушаговый режим
-
-// Инициализируемся с последовательностью выводов IN1-IN3-IN2-IN4
-// для использования AccelStepper с 28BYJ-48
-AccelStepper stepper1(HALFSTEP, motorPin1, motorPin3, motorPin2, motorPin4);
-
+  // Инициализируемся с последовательностью выводов IN1-IN3-IN2-IN4
+  // для использования AccelStepper с 28BYJ-48
+  AccelStepper stepper1(HALFSTEP, motorPin1, motorPin3, motorPin2, motorPin4);
+*/
 
 
 // WiFi // ---------------------------------------------------------------------------------------
@@ -330,9 +332,11 @@ void setup() {
 
   // настариваем скорость и направление движения мотора // ----------
 
-  stepper1.setMaxSpeed(1000.0);
-  stepper1.setSpeed(motor_speed);
-
+  if (motor_type == 1) {
+    /* stepper1.setMaxSpeed(1000.0);
+      stepper1.setSpeed(motor_speed);
+    */
+  }
   // TIME // ---------------------------------------------------------
 
   // Initialize a NTPClient to get time
@@ -691,13 +695,21 @@ void loop() {
 
 
   // Управление двигателем  // -----------------------------------------
-
   if (motor_rotate)
   {
-    stepper1.runSpeed(); // Крутим двигатель (нужно вызывать как можно чаще)
-    //int32_t CP = stepper1.currentPosition();
-    //if (debug == 1) Serial.println("currentPosition = " + String(stepper1.currentPosition()));
-    //!Подсчет количества сделанных шагов
+    if (motor_type == 1) {
+      //stepper1.runSpeed(); // Крутим двигатель (нужно вызывать как можно чаще)
+    }
+    else {
+      if (current_direction == $UP) {
+        digitalWrite(motorPin1, LOW);
+        digitalWrite(motorPin2, HIGH);
+      }
+      if (current_direction == $DOWN) {
+        digitalWrite(motorPin2, LOW);
+        digitalWrite(motorPin1, HIGH);
+      }
+    }
   }
   else
   {
@@ -724,7 +736,9 @@ void loop() {
     {
       motor_rotate = true;
       current_direction = $UP;
-      stepper1.setSpeed(motor_speed); // Настраеваем скорость и направление движения
+      if (motor_type == 1) {
+        //stepper1.setSpeed(motor_speed); // Настраеваем скорость и направление движения
+      }
       start_rotating_time = millis(); // Стартуем таймер
     }
     motor_go_up = 0; // команда обработана => сброс команды
@@ -741,7 +755,9 @@ void loop() {
     {
       motor_rotate = true;
       current_direction = $DOWN;
-      stepper1.setSpeed(-motor_speed); // Настраеваем скорость и направление движения
+      if (motor_type == 1) {
+        //stepper1.setSpeed(-motor_speed); // Настраеваем скорость и направление движения
+      }
       start_rotating_time = millis(); // Стартуем таймер
     }
     motor_go_down = 0; // команда обработана => сброс команды
@@ -857,7 +873,7 @@ void loop() {
   {
     error_status_cr = true;
     error_status_old = error_status;
-  }  
+  }
   //motor_rotate_out = String(motor_rotate);
 
   /*
